@@ -1,43 +1,50 @@
 import pandas as pd
 import numpy as np
+import os
+
+os.environ['CXX'] = 'cl.exe'
 from sklearn import model_selection
+
 import torch.nn as nn
 from models.s4.s4 import S4Block as S4  # Can use full version instead of minimal S4D standalone below
 from models.s4.s4d import S4D
+
 import torch.optim as optim
 import torch
 from torch.nn.utils.rnn import pad_sequence
-import os
-os.environ['CXX'] = 'g++-8'
 
 print('Imported packages successfully')
-df=pd.read_csv('Clusteredseq.csv')
+#df=pd.read_csv('ClusteredSeq.csv')
+
+df=pd.read_csv('subsetdata.csv')
 
 Y = df.drop(df.columns[0], axis=1)
 
 # Categories
-categories =np.array(np.arange(2,187), dtype= float)
-num_rows = df.shape[0]
-# One-hot encoding
+categories =np.array(np.arange(0,500), dtype= float) #Get a list of all the clusters
+num_rows = df.shape[0] #no. samples in dataset
+
+#One-hot encoding
 y = []
 
 for i in range(num_rows):
+    '''Encoding each protein sequence's GO annotation as a binary vector of length equal to the number of clusters'''
     row=Y.loc[i]
     row = row.values
 
     encoded_row = [1 if category in row else 0 for category in categories]
-    #print(encoded_row)
     y.append(encoded_row)
 
 amino_acids = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T','U', 'V', 'W', 'Y']
 
 def one_hot_encode(sequence):
+    '''Produce one hot encoding of the protein sequences'''
     encoding = np.zeros((len(sequence), len(amino_acids)))
     for i, aa in enumerate(sequence):
         encoding[i, amino_acids.index(aa)] = 1
     return encoding
 
-X= df['1'].apply(one_hot_encode)
+X= df['Sequence'].apply(one_hot_encode)
 seq=[]
 for row in X:
     seq.append(row)
@@ -47,16 +54,8 @@ X_train, X_test, y_train, y_test = model_selection.train_test_split(seq, y,
 
 X_test, X_val, y_test, y_val = model_selection.train_test_split(X_test, y_test, train_size=0.50, test_size=0.50, random_state=4)
 
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
-#X_train = np.array(X_train)
-# Convert the list of lists to a PyTorch tensor
-#X_train = X_train.apply(lambda x: torch.tensor(x, dtype=torch.float32))
-#X_train=X_train.values
-#X_train = torch.stack(X_train)
-
-#print(X_train)
-# Convert the list of NumPy arrays to a list of PyTorch tensors
 X_train = [torch.tensor(arr) for arr in X_train]
 X_train = pad_sequence(X_train, batch_first=True)
 
@@ -89,9 +88,9 @@ trainset = CustomDataset(X_train, y_train)
 valset = CustomDataset(X_val, y_val)
 testset = CustomDataset(X_test, y_test)
 
-bts=1
-n_classes=10
-d_input=1
+bts=1 #Batch size
+n_classes=500
+d_input=21 #Length of each vector in sequence
 d_output = 1
 
 # Dataloaders
@@ -104,7 +103,7 @@ class S4Model(nn.Module):
     def __init__(
         self,
         d_input,
-        d_output=10,
+        d_output=1000,
         d_model=256,
         n_layers=10,
         dropout=0.2,
@@ -175,8 +174,8 @@ if __name__ == "__main__":
     model = S4Model(
         d_input=d_input,
         d_output=n_classes,
-        d_model=10,
-        n_layers=10,
+        d_model=512, #set arbitrarily
+        n_layers=10, #set arbitrarily
         #dropout=args.dropout,
         #prenorm=args.prenorm,
     )
@@ -228,17 +227,20 @@ if __name__ == "__main__":
 
     criterion = nn.BCEWithLogitsLoss()
     accuracy=[]
+
     optimizer, scheduler = setup_optimizer(
-        model, lr=0.001, weight_decay=0.001, epochs=10
+        model, lr=0.001, weight_decay=0.00001, epochs=10
     )
-    for epoch in range(10):
+
+    for epoch in range(2):
         model.train()
         for inputs, targets in trainloader:
 
                 targets = targets.float()
+                inputs =inputs.float()
                 output=model(inputs)
                 loss = criterion((output), targets)
-                print(loss)
+                print(loss.item())
                 optimizer.zero_grad()
 
                 #Perform backward pass
@@ -252,16 +254,17 @@ if __name__ == "__main__":
         for inputs, targets in valloader:
                 #Perform forward pass
                 targets= targets.float()
+                inputs=inputs.float()
                 output=model(inputs)
                 targets=targets.squeeze()
                 predicted_labels= torch.round(torch.sigmoid(output)) #sigmoid produces probabilities that are rounded to 0 or 1
                 predicted_labels = predicted_labels.squeeze()
-                print(predicted_labels)
+                #print(predicted_labels)
                 metric= MulticlassAccuracy()
                 metric.update(predicted_labels, targets)
                 a=metric.compute()
         accuracy.append(a)
-        print(a)
+        print('The current accuracy score is:', a)
 
 
     torch.save(model, 's4.pth')
