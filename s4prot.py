@@ -3,15 +3,32 @@ import numpy as np
 import os
 
 os.environ['CXX'] = 'cl.exe'
-from sklearn import model_selection
 
+from sklearn import model_selection
 import torch.nn as nn
 from models.s4.s4 import S4Block as S4  # Can use full version instead of minimal S4D standalone below
 from models.s4.s4d import S4D
-
 import torch.optim as optim
 import torch
 from torch.nn.utils.rnn import pad_sequence
+import wandb
+
+bts=12 #Batch size
+n_classes=500
+d_input=21 #Length of each vector in sequence
+d_output = 1
+steps =50
+epochs=10
+
+run = wandb.init(
+    # Set the project where this run will be logged
+    project="Structured State Space",
+    # Track hyperparameters and run metadata
+    config={
+        "steps": steps,
+        "epochs": epochs,
+        "batch_size": bts,
+    })
 
 print('Imported packages successfully')
 #df=pd.read_csv('ClusteredSeq.csv')
@@ -59,7 +76,6 @@ from torch.utils.data import Dataset
 X_train = [torch.tensor(arr) for arr in X_train]
 X_train = pad_sequence(X_train, batch_first=True)
 
-#X_train=X_train.unsqueeze(-1)
 
 X_test=[torch.tensor(arr) for arr in X_test]
 X_test=pad_sequence(X_test, batch_first=True)
@@ -88,11 +104,6 @@ trainset = CustomDataset(X_train, y_train)
 valset = CustomDataset(X_val, y_val)
 testset = CustomDataset(X_test, y_test)
 
-bts=1 #Batch size
-n_classes=500
-d_input=21 #Length of each vector in sequence
-d_output = 1
-
 # Dataloaders
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=bts, shuffle=True, num_workers=5)
 valloader = torch.utils.data.DataLoader(valset, batch_size=bts, shuffle=False, num_workers=5)
@@ -103,7 +114,7 @@ class S4Model(nn.Module):
     def __init__(
         self,
         d_input,
-        d_output=1000,
+        d_output=10,
         d_model=256,
         n_layers=10,
         dropout=0.2,
@@ -112,7 +123,6 @@ class S4Model(nn.Module):
         super().__init__()
 
         self.prenorm = prenorm
-        print(d_input, 'pause', d_model)
 
         # Linear encoder (d_input = 1 for grayscale and 3 for RGB)
         self.encoder = nn.Linear(d_input, d_model)
@@ -181,7 +191,7 @@ if __name__ == "__main__":
     )
 
 
-    def setup_optimizer(model, lr, weight_decay, epochs):
+    def setup_optimizer(model, lr, weight_decay, steps_per_epoch):
         """
         S4 requires a specific optimizer setup.
         The S4 layer (A, B, C, dt) parameters typically
@@ -212,7 +222,7 @@ if __name__ == "__main__":
 
         # Create a lr scheduler
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=patience, factor=0.2)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, steps_per_epoch)
 
         # Print optimizer info
         keys = sorted(set([k for hp in hps for k in hp.keys()]))
@@ -227,12 +237,20 @@ if __name__ == "__main__":
 
     criterion = nn.BCEWithLogitsLoss()
     accuracy=[]
+    training_loss=[]
+    validation_loss=[]
+    
+    validation_f1=[]
+    validation_auc=[]
+
+    test_f1=[]
+    test_auc=[]
 
     optimizer, scheduler = setup_optimizer(
-        model, lr=0.001, weight_decay=0.00001, epochs=10
+        model, lr=0.001, weight_decay=0.00001, steps_per_epoch=steps
     )
 
-    for epoch in range(2):
+    for epoch in range(epochs):
         model.train()
         for inputs, targets in trainloader:
 
@@ -240,18 +258,48 @@ if __name__ == "__main__":
                 inputs =inputs.float()
                 output=model(inputs)
                 loss = criterion((output), targets)
-                print(loss.item())
+                t_loss=loss.item()
+                
+                training_loss.append(t_loss)
+
                 optimizer.zero_grad()
 
                 #Perform backward pass
                 loss.backward()
                 optimizer.step()
-                #print('training')
+                wandb.log({"training loss": loss})
+
 
         model.eval()
-        from torcheval.metrics import MulticlassAccuracy
+
+        from torcheval.metrics.functional import multiclass_f1_score, MulticlassAUPRC
 
         for inputs, targets in valloader:
+                #Perform forward pass
+                targets = targets.float()
+                inputs =inputs.float()
+                output=model(inputs)
+                loss = criterion((output), targets)
+
+                v_loss=loss.item()
+                validation_loss.append(v_loss)
+
+                targets=targets.squeeze()
+                predicted_labels= torch.round(torch.sigmoid(output)) #sigmoid produces probabilities that are rounded to 0 or 1
+                predicted_labels = predicted_labels.squeeze()
+                
+                vmetricAuC = MulticlassAUPRC(num_classes=n_classes)
+                vmetricAuC.update(predicted_labels, targets, num_classes=n_classes)
+                vAuC=vmetricAuC.compute()
+ 
+                vmetricf1=multiclass_f1_score()
+                vmetricf1.update(predicted_labels, targets, num_classes=n_classes)
+                vf1=vmetricf1.compute()
+                
+                wandb.log({"validation loss": loss}, {"Validation F1 Score": vf1}, {"Validation AuC": vAuC})
+
+ 
+    for inputs, targets in testloader:
                 #Perform forward pass
                 targets= targets.float()
                 inputs=inputs.float()
@@ -259,18 +307,17 @@ if __name__ == "__main__":
                 targets=targets.squeeze()
                 predicted_labels= torch.round(torch.sigmoid(output)) #sigmoid produces probabilities that are rounded to 0 or 1
                 predicted_labels = predicted_labels.squeeze()
-                #print(predicted_labels)
-                metric= MulticlassAccuracy()
-                metric.update(predicted_labels, targets)
-                a=metric.compute()
-        accuracy.append(a)
-        print('The current accuracy score is:', a)
 
+                tmetricAuC = MulticlassAUPRC(num_classes=n_classes)
+                tmetricAuC.update(predicted_labels, targets, num_classes=n_classes)
+                tAuC=tmetricAuC.compute()
+
+                tmetricf1=multiclass_f1_score()
+                tmetricf1.update(predicted_labels, targets, num_classes=n_classes)
+                tf1=tmetricf1.compute()
+
+                wandb.log({"Test F1 Score": tf1}, {"Test AuC": tAuC})
 
     torch.save(model, 's4.pth')
+    wandb.save(model.state_dict())
 
-    import matplotlib.pyplot as plt
-    plt.plot(accuracy)
-    plt.ylabel('accuracy')
-    plt.xlabel('epoch')
-    plt.show()
