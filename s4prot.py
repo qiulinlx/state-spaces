@@ -11,18 +11,21 @@ from models.s4.s4d import S4D
 import torch.optim as optim
 import torch
 from torch.nn.utils.rnn import pad_sequence
+from torcheval.metrics.functional import multiclass_f1_score, multilabel_auprc
 import wandb
 
 bts=12 #Batch size
 n_classes=500
 d_input=21 #Length of each vector in sequence
 d_output = 1
-steps =50
+steps =2
 epochs=10
 
+wandb.login(key='7b95dbe82c6138a403e12795e0fd55461555b0e4')
 run = wandb.init(
     # Set the project where this run will be logged
     project="Structured State Space",
+    dir="home/lxxqiu001/temp",
     # Track hyperparameters and run metadata
     config={
         "steps": steps,
@@ -31,6 +34,7 @@ run = wandb.init(
     })
 
 print('Imported packages successfully')
+
 #df=pd.read_csv('ClusteredSeq.csv')
 
 df=pd.read_csv('subsetdata.csv')
@@ -268,11 +272,10 @@ if __name__ == "__main__":
                 loss.backward()
                 optimizer.step()
                 wandb.log({"training loss": loss})
-
+	    
+        print("Training for 1 epoch is over")
 
         model.eval()
-
-        from torcheval.metrics.functional import multiclass_f1_score, MulticlassAUPRC
 
         for inputs, targets in valloader:
                 #Perform forward pass
@@ -288,7 +291,7 @@ if __name__ == "__main__":
                 predicted_labels= torch.round(torch.sigmoid(output)) #sigmoid produces probabilities that are rounded to 0 or 1
                 predicted_labels = predicted_labels.squeeze()
                 
-                vmetricAuC = MulticlassAUPRC(num_classes=n_classes)
+                vmetricAuC =multilabel_auprc( predicted_labels, targets ,num_classes=n_classes)
                 vmetricAuC.update(predicted_labels, targets, num_classes=n_classes)
                 vAuC=vmetricAuC.compute()
  
@@ -297,8 +300,10 @@ if __name__ == "__main__":
                 vf1=vmetricf1.compute()
                 
                 wandb.log({"validation loss": loss}, {"Validation F1 Score": vf1}, {"Validation AuC": vAuC})
+	
+        print("finish validation for one epoch")
 
- 
+    model.eval()
     for inputs, targets in testloader:
                 #Perform forward pass
                 targets= targets.float()
@@ -308,7 +313,7 @@ if __name__ == "__main__":
                 predicted_labels= torch.round(torch.sigmoid(output)) #sigmoid produces probabilities that are rounded to 0 or 1
                 predicted_labels = predicted_labels.squeeze()
 
-                tmetricAuC = MulticlassAUPRC(num_classes=n_classes)
+                tmetricAuC = multilabel_auprc( predicted_labels, targets ,num_classes=n_classes)
                 tmetricAuC.update(predicted_labels, targets, num_classes=n_classes)
                 tAuC=tmetricAuC.compute()
 
@@ -317,6 +322,8 @@ if __name__ == "__main__":
                 tf1=tmetricf1.compute()
 
                 wandb.log({"Test F1 Score": tf1}, {"Test AuC": tAuC})
+	
+    print("finish testing")
 
     torch.save(model, 's4.pth')
     wandb.save(model.state_dict())
