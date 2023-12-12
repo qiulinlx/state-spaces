@@ -14,24 +14,12 @@ bts=2 #Batch size
 n_classes=1
 d_input=21 #Length of each vector in sequence
 d_output = 1
-steps =1
-n_epochs=1
-
-wandb.login(key='7b95dbe82c6138a403e12795e0fd55461555b0e4')
-run = wandb.init(
-    # Set the project where this run will be logged
-    project="Structured State Space 2",
-    dir="home/lxxqiu001/temp",
-    # Track hyperparameters and run metadata
-    config={
-        "steps": steps,
-        "epochs": n_epochs,
-        "batch_size": bts,
-    })
+steps =50
+n_epochs=10
 
 print('Imported packages successfully')
 
-df=pd.read_csv('BinartSubset.csv')
+df=pd.read_csv('Binartset.csv')
 
 y = df['0']
 num_rows = df.shape[0] #no. samples in dataset
@@ -168,6 +156,20 @@ class S4Model(nn.Module):
             return x
 
 if __name__ == "__main__":
+
+    wandb.login(key='7b95dbe82c6138a403e12795e0fd55461555b0e4')
+    run = wandb.init(
+        # Set the project where this run will be logged
+        project="Structured State Space 2",
+        dir="home/lxxqiu001/temp",
+        # Track hyperparameters and run metadata
+        config={
+            "steps": steps,
+            "epochs": n_epochs,
+            "batch_size": bts,
+        })
+
+
     # Model
     print('==> Building model..')
     model = S4Model(
@@ -260,7 +262,7 @@ if __name__ == "__main__":
                 loss.backward()
                 print(t_loss)
                 optimizer.step()
-                #wandb.log({"training loss": loss})
+                wandb.log({"training loss": t_loss})
 	    
         print("Training for 1 epoch is over")
 
@@ -282,10 +284,10 @@ if __name__ == "__main__":
                 v_loss=loss.item()
                 validation_loss.append(v_loss)
                 print(v_loss)
-                wandb.log({"validation loss": loss})
+                wandb.log({"validation loss": v_loss})
 	
         print("finish validation for one epoch")
-    torch.save(model, 's4.pth')
+    # torch.save(model, 'bins4.pth')
 
     # model = S4Model(
     #     d_input=d_input,
@@ -295,8 +297,8 @@ if __name__ == "__main__":
     #     #dropout=args.dropout,
     #     #prenorm=args.prenorm,
     # )
-    # model.load_state_dict(model.state_dict(), torch.load('s4.pth'))
-    model.eval()
+    # model.load_state_dict(model.state_dict(), torch.load('bins4.pth'))
+    # model.eval()
     for inputs, targets in testloader:
                 #Perform forward pass
                 targets= targets.float()
@@ -309,20 +311,24 @@ if __name__ == "__main__":
                 tmetricAuC =BinaryAUPRC()
                 tmetricAuC.update(predicted_labels, targets)
                 tAuC=tmetricAuC.compute()
-                tAuC=int(tAuC.item())
-                print("TauPRC",tAuC)
+                AuC=(tAuC.item())
+                print("TauPRC",AuC)
                 targets = targets.view(-1)
                 predicted_labels = predicted_labels.view(-1)
 
                 tmetricf1=BinaryF1Score()
                 tmetricf1.update(predicted_labels, targets)
                 tf1=tmetricf1.compute()
-                tf1=int(tf1.item())
-                print("F1",tf1)
-                wandb.log({"Test F1 Score": tf1}, {"Test AuC": tAuC})
+                f1=(tf1.item())
+                print("F1",f1)
+                wandb.log({"Test F1 Score": f1})
+
+                # Log the AUC score
+                wandb.log({"Test AuC": AuC})
+
 	
     print("finish testing")
 
-    torch.save(model, 's4.pth')
-    wandb.save(model.state_dict())
+    torch.save(model.state_dict(), 'bins4.pth')
+    wandb.save('s4_model_state_dict.pth')
 

@@ -1,5 +1,9 @@
 import pandas as pd
 import numpy as np
+import os
+
+os.environ['CXX'] = 'cl.exe'
+
 from sklearn import model_selection
 import torch.nn as nn
 from models.s4.s4 import S4Block as S4  # Can use full version instead of minimal S4D standalone below
@@ -14,33 +18,44 @@ bts=12 #Batch size
 n_classes=500
 d_input=21 #Length of each vector in sequence
 d_output = 1
-steps =2
-n_epochs=2
+steps =50
+epochs=10
 
-# wandb.login(key='7b95dbe82c6138a403e12795e0fd55461555b0e4')
-# run = wandb.init(
-#     # Set the project where this run will be logged
-#     project="Structured State Space",
-#     dir="home/lxxqiu001/temp",
-#     # Track hyperparameters and run metadata
-#     config={
-#         "steps": steps,
-#         "epochs": n_epochs,
-#         "batch_size": bts,
-#     })
+wandb.login(key='7b95dbe82c6138a403e12795e0fd55461555b0e4',)
 
 print('Imported packages successfully')
 
-#df=pd.read_csv('ClusteredSeq.csv')
-
 df=pd.read_csv('subsetdata.csv')
 
-Y = df.drop(df.columns[0], axis=1)
+#df=pd.read_csv('subsetdata.csv')
+
+#df=df.drop(['Unnamed: 0'], axis=1)
+Y = df.drop("Sequence", axis=1)
 
 # Categories
 categories =np.array(np.arange(0,500), dtype= float) #Get a list of all the clusters
 num_rows = df.shape[0] #no. samples in dataset
 
+# Initialize a dictionary to store the counts
+counts=[]
+for i in range(0,n_classes):
+    label = float(i)
+    count= (Y.values == label).sum()
+    counts.append(count)
+
+# Step 2: Calculate class weights based on class frequencies
+total_samples = num_rows
+class_weights=[]
+for i in range(len(counts)):
+    if counts[i] == 0:
+        weights = 0.001
+    else:
+    #print(class_labels[i])
+        weights = total_samples / (n_classes* counts[i])
+    
+    class_weights.append(weights)
+
+class_weights=torch.tensor(class_weights, dtype=torch.float32)
 #One-hot encoding
 y = []
 
@@ -116,7 +131,7 @@ class S4Model(nn.Module):
         d_input,
         d_output=10,
         d_model=256,
-        n_layers=10,
+        n_layers=20,
         dropout=0.2,
         prenorm=False,
     ):
@@ -179,16 +194,30 @@ class S4Model(nn.Module):
             return x
 
 if __name__ == "__main__":
+    run = wandb.init(
+    # Set the project where this run will be logged
+    project="Structured State Space",
+    _service_wait=60,
+    dir="home/lxxqiu001/temp",
+    # Track hyperparameters and run metadata
+    config={
+        "steps": steps,
+        "epochs": epochs,
+        "batch_size": bts,
+    })
+    m=nn.Sigmoid()
+    print("Sigmoid")
     # Model
     print('==> Building model..')
     model = S4Model(
         d_input=d_input,
         d_output=n_classes,
         d_model=512, #set arbitrarily
-        n_layers=10, #set arbitrarily
+        n_layers=25, #set arbitrarily
         #dropout=args.dropout,
         #prenorm=args.prenorm,
     )
+
 
     def setup_optimizer(model, lr, weight_decay, steps_per_epoch):
         """
@@ -234,7 +263,7 @@ if __name__ == "__main__":
 
         return optimizer, scheduler
 
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     accuracy=[]
     training_loss=[]
     validation_loss=[]
@@ -246,57 +275,47 @@ if __name__ == "__main__":
     test_auc=[]
 
     optimizer, scheduler = setup_optimizer(
-        model, lr=0.002, weight_decay=0.0000001, steps_per_epoch=steps
+        model, lr=0.0015, weight_decay=0.000001, steps_per_epoch=steps
     )
 
-    # for epoch in range(n_epochs):
-    #     model.train()
-    #     for inputs, targets in trainloader:
+    for epoch in range(epochs):
+        model.train()
+        for inputs, targets in trainloader:
 
-    #             targets = targets.float()
-    #             inputs =inputs.float()
-    #             output=model(inputs)
-    #             loss = criterion((output), targets)
-    #             t_loss=loss.item()
+                targets = targets.float()
+                inputs =inputs.float()
+                output=model(inputs)
+                print(output)
+                loss = criterion(m(output), targets)
+                t_loss=loss.item()
                 
-    #             training_loss.append(t_loss)
+                training_loss.append(t_loss)
 
-    #             optimizer.zero_grad()
+                optimizer.zero_grad()
 
-    #             #Perform backward pass
-    #             loss.backward()
-    #             print(t_loss)
-    #             optimizer.step()
-    #             #wandb.log({"training loss": loss})
+                #Perform backward pass
+                loss.backward()
+                optimizer.step()
+                wandb.log({"training loss": loss})
 	    
-    #     print("Training for 1 epoch is over")
+        print("Training for 1 epoch is over")
 
-    #     model.eval()
+        model.eval()
 
-    #     for inputs, targets in valloader:
-    #             #Perform forward pass
-    #             targets = targets.float()
-    #             inputs =inputs.float()
-    #             output=model(inputs)
-    #             loss = criterion((output), targets)
+        for inputs, targets in valloader:
+                #Perform forward pass
+                targets = targets.float()
+                inputs =inputs.float()
+                output=model(inputs)
+                loss = criterion(m(output), targets)
 
-    #             v_loss=loss.item()
-    #             validation_loss.append(v_loss)
-    #             print(v_loss)
-    #             #wandb.log({"validation loss": loss}, {"Validation F1 Score": vf1}, {"Validation AuC": vAuC})
+                v_loss=loss.item()
+                validation_loss.append(v_loss)
+                
+                wandb.log({"validation loss": v_loss})
 	
-    #     print("finish validation for one epoch")
-    # torch.save(model, 's4.pth')
+        print("finish validation for one epoch")
 
-    model = S4Model(
-        d_input=d_input,
-        d_output=n_classes,
-        d_model=512, #set arbitrarily
-        n_layers=10, #set arbitrarily
-        #dropout=args.dropout,
-        #prenorm=args.prenorm,
-    )
-    model.load_state_dict(model.state_dict(), torch.load('s4.pth'))
     model.eval()
     for inputs, targets in testloader:
                 #Perform forward pass
@@ -308,18 +327,22 @@ if __name__ == "__main__":
                 tmetricAuC =MultilabelAUPRC(num_labels=500, average='macro')
                 tmetricAuC.update(predicted_labels, targets)
                 tAuC=tmetricAuC.compute()
-                print(tAuC)
+                print("AuC", tAuC.item())
                 targets=targets.squeeze()
                 predicted_labels = predicted_labels.squeeze()
 
                 tmetricf1=MulticlassF1Score(num_classes=n_classes)
                 tmetricf1.update(predicted_labels, targets)
                 tf1=tmetricf1.compute()
+                print("F1 Score", tf1.item())
+                wandb.log({"Test F1 Score": tf1})
 
-                #wandb.log({"Test F1 Score": tf1}, {"Test AuC": tAuC})
+                # Log the AUC score
+                wandb.log({"Test AuC": tAuC})
+
 	
     print("finish testing")
 
-    torch.save(model, 's4.pth')
-    wandb.save(model.state_dict())
+    torch.save(model.state_dict(), 's4.pth')
+    wandb.save('s4_model_state_dict.pth')
 
