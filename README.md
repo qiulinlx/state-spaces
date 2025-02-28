@@ -1,14 +1,23 @@
-# Protein Annotation using Structured State Space Models (S4)
+# :curly_loop: Protein Annotation using Structured State Space Models (S4)
 
-## Overview
+<p align="center">
+  <img src="results/peptide.png" width="300"/>
+</p>
+
+## :page_facing_up: Overview
 
 Approximately 100,000 unique proteins exist in the human body alone, with many more in other organisms. These proteins perform vital functions necessary for life, making it crucial to understand their roles. While many proteins have been sequenced, only a fraction have been annotated with their functions due to the labor-intensive nature of the process. This leaves a significant number of sequenced proteins with unknown functions that could be invaluable to researchers.
 
 Structured State Space Models (S4), introduced by [Gu et al. (2022)](https://arxiv.org/abs/2111.00396), have demonstrated superior performance in handling long sequential data compared to other machine learning models. The S4 model outperforms Transformers and other sequence modeling architectures on the Long Range Arena benchmark, making it particularly well-suited for protein sequences, which can span up to 35,000 amino acids. This repository contains the code and implementation details from the accompanying [paper](results/Honours_Thesis.pdf).
 
 ---
+## :wrench: Getting started
 
-## Data Preprocessing
+```commandline
+pip install -r src/State-spaces/requirements.txt
+```
+
+### Data Preprocessing
 
 To preprocess the protein sequence data and extract features using ProtBERT, run the following command:
 
@@ -19,14 +28,14 @@ python protbert_pipeline.py \
     --output_csv ProtBertdata.csv
 ```
 This script performs the following:
-    <!-- Converts clustered protein sequences into a binary dataset.
+* Converts clustered protein sequences into a binary dataset.
 
-    Extracts feature embeddings using the ProtBERT model.
+* Extracts feature embeddings using the ProtBERT model.
 
-    Saves the extracted features to a CSV file. -->
+* Saves the extracted features to a CSV file.
 
-## How to Run
-### Binary Classification
+### How to Run
+#### Binary Classification
 
 To train the S4 model for binary classification, use the following command:
 
@@ -43,7 +52,7 @@ python train_s4_binary.py \
     --wandb_key YOUR_WANDB_KEY
 ```
 
-### Multilabel Classification
+#### Multilabel Classification
 
 To train the S4 model for multilabel classification, use the following command:
 
@@ -59,5 +68,11 @@ python train_s4_multilabel.py \
     --data_path subsetdata.csv \
     --wandb_key YOUR_WANDB_KEY
 ```
+## Data Pipeline 
+
+<p align="center">
+  <img src="results/data_pipeline.png" width="500"/>
+</p>
 
 
+## To do list
